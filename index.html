@@ -17,24 +17,20 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/theme-tomorrow_night_eighties.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/theme-chrome.min.js"></script>
 
-  <!-- Skulpt: In-Browser Python 3 Engine -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/skulpt/1.2.0/skulpt.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/skulpt/1.2.0/skulpt-stdlib.js"></script>
-
-  <link rel="stylesheet" href="src/styles/asiri-theme.css">
+  <link rel="stylesheet" href="src/styles/asiri-theme.css?v=2.1.0">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,4 36,36 4,36' fill='%23c22b26'/%3E%3Cpolygon points='20,16 30,34 10,34' fill='%23e5a912'/%3E%3Cpolygon points='20,24 26,34 14,34' fill='%2315803d'/%3E%3C/svg%3E">
 </head>
 <body>
   <div id="app">
     <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Tajawal', sans-serif;">
       <div style="text-align: center; color: #94a3b8;">
-        <div style="font-size: 2.5rem; margin-bottom: 12px; animation: pulse 1.5s infinite;">🎨 🏛️ ⚡</div>
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">🎨 🏛️ ⚡</div>
         <div style="font-size: 1.1rem; font-weight: 700;">جاري تحميل محراب قطّاط البرمجة...</div>
       </div>
     </div>
   </div>
 
-  <!-- Master UI Application Script -->
-  <script type="module" src="src/ui/app.js"></script>
+  <!-- Master UI Application Script with Cache Buster -->
+  <script type="module" src="src/ui/app.js?v=2.1.0"></script>
 </body>
 </html>
