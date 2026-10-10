@@ -1,0 +1,21 @@
+{
+  "name": "qattat-code",
+  "version": "1.0.0",
+  "description": "قطّاط البرمجة (Qattat Code) - منصة التدريب البرمجي بطابع فن القط العسيري والتراث الجنوبي",
+  "type": "module",
+  "main": "src/ui/app.js",
+  "scripts": {
+    "test": "node tests/qattat.test.js"
+  },
+  "keywords": [
+    "qatt-asiri",
+    "coding-challenges",
+    "algorithms",
+    "python",
+    "javascript",
+    "heritage-tech",
+    "saudi-culture"
+  ],
+  "author": "أ. طارق ابوعشي",
+  "license": "MIT"
+}
