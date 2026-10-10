@@ -41,11 +41,11 @@ export const CHALLENGES = [
       'ادمج الكلمات المعكوسة مجدداً باستخدام " ".join(...).'
     ],
     starterCode: {
-      python: `def reverse_words(s: str) -> str:
-    # اكتب حلك الأنيق هنا
+      python: `# اكتب حلك هنا (Write your solution here)
+def reverse_words(s: str) -> str:
     pass`,
-      javascript: `function reverse_words(s) {
-    // اكتب حلك الأنيق هنا
+      javascript: `// اكتب حلك هنا (Write your solution here)
+function reverse_words(s) {
     return "";
 }`
     },

@@ -5,10 +5,10 @@
  * Author: 🏛️ أ. طارق ابوعشي
  */
 
-import { CHALLENGES } from '../data/challenges.js';
-import { RANKS, BADGES } from '../data/badges.js';
-import { CodeRunner } from '../engine/runner.js';
-import { QattGenerator } from '../engine/qatt-generator.js';
+import { CHALLENGES } from '../data/challenges.js?v=2.2.0';
+import { RANKS, BADGES } from '../data/badges.js?v=2.2.0';
+import { CodeRunner } from '../engine/runner.js?v=2.2.0';
+import { QattGenerator } from '../engine/qatt-generator.js?v=2.2.0';
 
 class QattatApp {
   constructor() {
