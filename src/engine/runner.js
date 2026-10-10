@@ -1,6 +1,8 @@
 /**
- * قطّاط البرمجة - محرك تنفيذ وفحص الأكواد المباشر في المتصفح
- * Safe In-Browser Code Runner & Test Case Evaluator
+ * قطّاط البرمجة - محرك تنفيذ وفحص الأكواد المتقدم في المتصفح
+ * Production-Grade In-Browser Code Runner & Test Evaluator
+ * Supports Native JavaScript & Full In-Browser Python 3 (via Skulpt + Driver Harness)
+ * 
  * Author: 🏛️ أ. طارق ابوعشي
  */
 
@@ -33,24 +35,20 @@ export function isDeepEqual(actual, expected) {
 
 export class CodeRunner {
   constructor() {
-    this.logs = [];
+    this.isSkulptReady = typeof window !== 'undefined' && typeof window.Sk !== 'undefined';
   }
 
   /**
-   * Safely execute JavaScript code against test cases
+   * Execute JavaScript safely in browser with console interception & benchmarking
    */
   async runJavaScript(code, functionName, testCases) {
-    const originalConsoleLog = console.log;
     const capturedLogs = [];
-
-    // Capture user logs
     const logger = (...args) => {
       capturedLogs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
     };
 
     let userFn;
     try {
-      // Evaluate function in safe scope
       const wrappedCode = `
         ${code}
         return (typeof ${functionName} !== 'undefined') ? ${functionName} : null;
@@ -59,7 +57,7 @@ export class CodeRunner {
       userFn = fnFactory({ log: logger, info: logger, warn: logger, error: logger });
 
       if (typeof userFn !== 'function') {
-        throw new Error(`لم يتم العثور على الدالة '${functionName}'. تأكد من عدم تغيير اسم الدالة المطلوب.`);
+        throw new Error(`لم يتم العثور على الدالة '${functionName}'. تأكد من الحفاظ على اسم الدالة الأصلي المطلوب.`);
       }
     } catch (compileErr) {
       return {
@@ -80,7 +78,6 @@ export class CodeRunner {
       let passed = false;
 
       try {
-        // Clone inputs so user code mutating arguments does not leak across cases
         const clonedInputs = JSON.parse(JSON.stringify(tc.input));
         actualOutput = userFn(...clonedInputs);
         const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
@@ -119,17 +116,152 @@ export class CodeRunner {
   }
 
   /**
-   * Safe Python-to-JavaScript transpile & runtime simulator for standard challenge algorithms
+   * Execute Python code in browser
+   * Uses Skulpt engine when available with Python test harness
    */
   async runPython(code, functionName, testCases) {
-    // Lightweight, resilient Python transpilation for typical algorithmic functions
-    const capturedLogs = [];
-    const logger = (...args) => {
-      capturedLogs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+    // If Skulpt is available in the browser window
+    if (typeof window !== 'undefined' && window.Sk) {
+      return this._runPythonWithSkulpt(code, functionName, testCases);
+    }
+
+    // Fallback: Transpile/Execute via simulated JS runner
+    return this._runPythonFallback(code, functionName, testCases);
+  }
+
+  async _runPythonWithSkulpt(code, functionName, testCases) {
+    const logs = [];
+    const outf = (text) => {
+      // Don't log driver sentinel lines
+      if (!text.includes('__TEST_OUTPUT_') && text.trim().length > 0) {
+        logs.push(text.trimEnd());
+      }
     };
 
+    const builtinRead = (x) => {
+      if (window.Sk.builtinFiles === undefined || window.Sk.builtinFiles["files"][x] === undefined) {
+        throw new Error("File not found: '" + x + "'");
+      }
+      return window.Sk.builtinFiles["files"][x];
+    };
+
+    window.Sk.configure({
+      output: outf,
+      read: builtinRead,
+      __future__: window.Sk.python3
+    });
+
+    // Prepare driver script
+    const safeInputs = JSON.stringify(testCases.map(tc => ({ id: tc.id, input: tc.input })));
+
+    const driverCode = `
+import json
+
+${code}
+
+_inputs = json.loads('''${safeInputs}''')
+_raw_results = []
+
+for _item in _inputs:
+    try:
+        _out = ${functionName}(*_item['input'])
+        _raw_results.append({'id': _item['id'], 'actual': _out, 'error': None})
+    except Exception as _e:
+        _raw_results.append({'id': _item['id'], 'actual': None, 'error': str(_e)})
+
+print("__TEST_OUTPUT_START__")
+print(json.dumps(_raw_results))
+print("__TEST_OUTPUT_END__")
+`;
+
+    let allOutput = '';
+    const captureAll = (t) => {
+      allOutput += t;
+      outf(t);
+    };
+
+    window.Sk.configure({
+      output: captureAll,
+      read: builtinRead,
+      __future__: window.Sk.python3
+    });
+
     try {
-      const jsEquivalent = this.transpilePythonToJs(code, functionName);
+      const startTime = performance.now();
+      await window.Sk.misceval.asyncToPromise(() => {
+        return window.Sk.importMainWithBody('<stdin>', false, driverCode, true);
+      });
+      const totalDuration = Math.round(performance.now() - startTime);
+
+      // Extract JSON results from output
+      const startMarker = '__TEST_OUTPUT_START__';
+      const endMarker = '__TEST_OUTPUT_END__';
+      const startIdx = allOutput.indexOf(startMarker);
+      const endIdx = allOutput.indexOf(endMarker);
+
+      if (startIdx === -1 || endIdx === -1) {
+        throw new Error('لم يتم إرجاع نتائج الفحص بصيغة صالحة.');
+      }
+
+      const jsonStr = allOutput.substring(startIdx + startMarker.length, endIdx).trim();
+      const rawResults = JSON.parse(jsonStr);
+
+      const results = [];
+      let allPassed = true;
+
+      for (const tc of testCases) {
+        const found = rawResults.find(r => r.id === tc.id);
+        if (!found) {
+          allPassed = false;
+          results.push({
+            id: tc.id,
+            displayInput: tc.displayInput,
+            expected: tc.expected,
+            actual: null,
+            passed: false,
+            error: 'لم يتم تنفيذ الحالة',
+            durationMs: 0,
+            isHidden: tc.isHidden
+          });
+          continue;
+        }
+
+        const passed = !found.error && isDeepEqual(found.actual, tc.expected);
+        if (!passed) allPassed = false;
+
+        results.push({
+          id: tc.id,
+          displayInput: tc.displayInput,
+          expected: tc.expected,
+          actual: found.actual,
+          passed,
+          error: found.error,
+          durationMs: Math.round(totalDuration / testCases.length),
+          isHidden: tc.isHidden
+        });
+      }
+
+      return {
+        success: allPassed,
+        results,
+        logs: logs.filter(l => !l.includes('__TEST_OUTPUT_'))
+      };
+
+    } catch (pyErr) {
+      return {
+        success: false,
+        compileError: pyErr.toString(),
+        results: [],
+        logs
+      };
+    }
+  }
+
+  async _runPythonFallback(code, functionName, testCases) {
+    // Resilient fallback when Skulpt is offline
+    const capturedLogs = [];
+    try {
+      const jsEquivalent = this._transpilePythonToJs(code, functionName);
       return await this.runJavaScript(jsEquivalent, functionName, testCases);
     } catch (err) {
       return {
@@ -141,11 +273,8 @@ export class CodeRunner {
     }
   }
 
-  transpilePythonToJs(pyCode, targetFunctionName) {
-    // Clean Python type hints and standard constructs
+  _transpilePythonToJs(pyCode, targetFunctionName) {
     let js = pyCode;
-
-    // Convert print(...) to console.log(...)
     js = js.replace(/print\s*\(/g, 'console.log(');
 
     // Convert def foo(x: int) -> int: to function foo(x) {
@@ -154,26 +283,16 @@ export class CodeRunner {
       return `function ${fnName}(${cleanParams}) {`;
     });
 
-    // Convert True / False / None
     js = js.replace(/\bTrue\b/g, 'true');
     js = js.replace(/\bFalse\b/g, 'false');
     js = js.replace(/\bNone\b/g, 'null');
-
-    // Convert len(x) to (x).length
     js = js.replace(/\blen\s*\(([^)]+)\)/g, '($1).length');
-
-    // Convert .append(x) to .push(x)
     js = js.replace(/\.append\s*\(/g, '.push(');
-
-    // Convert and / or / not
     js = js.replace(/\band\b/g, '&&');
     js = js.replace(/\bor\b/g, '||');
     js = js.replace(/\bnot\s+/g, '!');
-
-    // Convert // (integer division)
     js = js.replace(/([a-zA-Z0-9_]+)\s*\/\/\s*([a-zA-Z0-9_]+)/g, 'Math.floor($1 / $2)');
 
-    // Indentation to braces converter
     const lines = js.split('\n');
     const outLines = [];
     const indentStack = [0];

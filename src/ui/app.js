@@ -1,23 +1,22 @@
 /**
  * قطّاط البرمجة - منسق الواجهة التفاعلية وتجربة المستخدم
- * Master UI Coordinator & State Management
+ * Master UI Coordinator & State Management with Ace Editor & Skulpt Integration
+ * 
  * Author: 🏛️ أ. طارق ابوعشي
  */
 
 import { CHALLENGES } from '../data/challenges.js';
 import { RANKS, BADGES } from '../data/badges.js';
 import { CodeRunner } from '../engine/runner.js';
-import { QattGenerator, ASIRI_COLORS } from '../engine/qatt-generator.js';
+import { QattGenerator } from '../engine/qatt-generator.js';
 
 class QattatApp {
   constructor() {
     this.runner = new CodeRunner();
     this.generator = new QattGenerator();
 
-    // Load persisted state or defaults
     this.state = this.loadState();
-
-    this.currentTab = 'challenges'; // 'challenges', 'workspace', 'lab', 'badges', 'guide'
+    this.currentTab = 'challenges';
     this.selectedChallenge = CHALLENGES[0];
     this.activeLanguage = this.selectedChallenge.track === 'python' ? 'python' : 'javascript';
     this.filterTrack = 'all';
@@ -25,7 +24,8 @@ class QattatApp {
     this.searchQuery = '';
     this.consoleOutput = null;
     this.testResults = null;
-    this.fontSize = 14;
+    this.compileError = null;
+    this.aceEditor = null;
 
     // Lab state
     this.labParams = {
@@ -89,22 +89,40 @@ class QattatApp {
     this.state.theme = theme;
     document.documentElement.setAttribute('data-theme', theme);
     this.saveState();
+    if (this.aceEditor) {
+      const aceTheme = theme === 'dark' ? 'ace/theme/tomorrow_night_eighties' : 'ace/theme/chrome';
+      this.aceEditor.setTheme(aceTheme);
+    }
     this.render();
   }
 
   switchTab(tab) {
+    // If leaving workspace, destroy existing editor instance cleanly
+    if (this.currentTab === 'workspace' && tab !== 'workspace' && this.aceEditor) {
+      this.saveCurrentCodeFromEditor();
+      this.aceEditor.destroy();
+      this.aceEditor = null;
+    }
+
     this.currentTab = tab;
     this.render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   openChallenge(challengeId) {
+    if (this.aceEditor) {
+      this.saveCurrentCodeFromEditor();
+      this.aceEditor.destroy();
+      this.aceEditor = null;
+    }
+
     const found = CHALLENGES.find(c => c.id === challengeId);
     if (found) {
       this.selectedChallenge = found;
       this.activeLanguage = found.track === 'python' ? 'python' : 'javascript';
       this.consoleOutput = null;
       this.testResults = null;
+      this.compileError = null;
       this.currentTab = 'workspace';
       this.render();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -125,21 +143,43 @@ class QattatApp {
     this.saveState();
   }
 
+  saveCurrentCodeFromEditor() {
+    if (this.aceEditor) {
+      const val = this.aceEditor.getValue();
+      this.saveChallengeCode(this.selectedChallenge.id, this.activeLanguage, val);
+    }
+  }
+
   resetCurrentCode() {
     const key = `${this.selectedChallenge.id}_${this.activeLanguage}`;
     delete this.state.savedCode[key];
     this.saveState();
-    this.render();
+    const resetCode = this.selectedChallenge.starterCode[this.activeLanguage] || '';
+    if (this.aceEditor) {
+      this.aceEditor.setValue(resetCode, -1);
+    } else {
+      const fallback = document.getElementById('code-editor-fallback');
+      if (fallback) fallback.value = resetCode;
+    }
+  }
+
+  getCurrentCode() {
+    if (this.aceEditor) {
+      return this.aceEditor.getValue();
+    }
+    const fallback = document.getElementById('code-editor-fallback');
+    return fallback ? fallback.value : this.getChallengeCode(this.selectedChallenge.id, this.activeLanguage);
   }
 
   async runCode() {
-    const editor = document.getElementById('code-editor');
-    const code = editor ? editor.value : this.getChallengeCode(this.selectedChallenge.id, this.activeLanguage);
+    const code = this.getCurrentCode();
     this.saveChallengeCode(this.selectedChallenge.id, this.activeLanguage, code);
 
     const firstTestCase = [this.selectedChallenge.testCases[0]];
     const consoleBox = document.getElementById('console-output-box');
-    if (consoleBox) consoleBox.innerHTML = '<span style="color:#38bdf8;">⏳ جاري فحص وتشغيل الكود...</span>';
+    if (consoleBox) {
+      consoleBox.innerHTML = '<span style="color:#38bdf8;">⏳ جاري فحص وتشغيل الكود (حالة الاختبار الأولى)...</span>';
+    }
 
     let result;
     if (this.activeLanguage === 'python') {
@@ -155,12 +195,13 @@ class QattatApp {
   }
 
   async submitSolution() {
-    const editor = document.getElementById('code-editor');
-    const code = editor ? editor.value : this.getChallengeCode(this.selectedChallenge.id, this.activeLanguage);
+    const code = this.getCurrentCode();
     this.saveChallengeCode(this.selectedChallenge.id, this.activeLanguage, code);
 
     const consoleBox = document.getElementById('console-output-box');
-    if (consoleBox) consoleBox.innerHTML = '<span style="color:#eab308;">⚡ جاري فحص كافة حالات الاختبار (المعلنة والخفية)...</span>';
+    if (consoleBox) {
+      consoleBox.innerHTML = '<span style="color:#eab308;">⚡ جاري فحص كافة حالات الاختبار (المعلنة والخفية)...</span>';
+    }
 
     let result;
     if (this.activeLanguage === 'python') {
@@ -174,7 +215,6 @@ class QattatApp {
     this.compileError = result.compileError;
 
     if (result.success) {
-      // Award XP if not already completed
       const isFirstSolve = !this.state.completedChallenges.includes(this.selectedChallenge.id);
       if (isFirstSolve) {
         this.state.completedChallenges.push(this.selectedChallenge.id);
@@ -280,7 +320,6 @@ class QattatApp {
     this.showToast('تم تصدير الجدارية بنجاح!', 'تم تنزيل ملف SVG عالي الدقة، ونلت وسام محراب الكود.');
   }
 
-  /* Rendering Sections */
   render() {
     const appEl = document.getElementById('app');
     if (!appEl) return;
@@ -491,7 +530,6 @@ class QattatApp {
   renderWorkspaceView() {
     const c = this.selectedChallenge;
     const isCompleted = this.state.completedChallenges.includes(c.id);
-    const code = this.getChallengeCode(c.id, this.activeLanguage);
 
     return `
       <div class="workspace-grid">
@@ -519,7 +557,7 @@ class QattatApp {
           <div>
             <div class="section-label">📌 القيود والشروط:</div>
             <ul style="padding-right:20px; font-size:0.84rem; color:var(--text-muted); line-height:1.6;">
-              ${c.constraints.map(item => `<li><span class="code-inline">${item}</span></li>`).join('')}
+              ${c.constraints.map(item => `<li><span class="code-inline" dir="ltr">${item}</span></li>`).join('')}
             </ul>
           </div>
 
@@ -528,10 +566,10 @@ class QattatApp {
             <div class="section-label">💡 أمثلة المدخلات والمخرجات:</div>
             ${c.examples.map((ex, i) => `
               <div class="example-box">
-                <div><strong>مثال ${i + 1}:</strong></div>
-                <div style="margin-top:4px;">المدخل: <span class="code-inline">${ex.input}</span></div>
-                <div style="margin-top:2px;">المخرج: <span class="code-inline">${ex.output}</span></div>
-                <div style="margin-top:4px; color:var(--text-muted); font-size:0.8rem;">${ex.explanationAr}</div>
+                <div style="font-weight:700; margin-bottom:4px;">مثال ${i + 1}:</div>
+                <div style="margin-top:2px;">المدخل: <span class="code-inline" dir="ltr">${ex.input}</span></div>
+                <div style="margin-top:4px;">المخرج: <span class="code-inline" dir="ltr">${ex.output}</span></div>
+                <div style="margin-top:6px; color:var(--text-muted); font-size:0.8rem;">${ex.explanationAr}</div>
               </div>
             `).join('')}
           </div>
@@ -559,8 +597,8 @@ class QattatApp {
               </button>
               <div class="hint-body">
                 <div style="margin-bottom:8px;">
-                  <strong>التعقيد الزمني:</strong> <span class="code-inline">${c.analysis.timeComplexity}</span> | 
-                  <strong>المكاني:</strong> <span class="code-inline">${c.analysis.spaceComplexity}</span>
+                  <strong>التعقيد الزمني:</strong> <span class="code-inline" dir="ltr">${c.analysis.timeComplexity}</span> | 
+                  <strong>المكاني:</strong> <span class="code-inline" dir="ltr">${c.analysis.spaceComplexity}</span>
                 </div>
                 <p style="font-size:0.84rem; color:var(--text-muted); margin-bottom:12px;">${c.analysis.explanationAr}</p>
                 <div style="font-size:0.8rem; background:var(--bg-secondary); padding:10px; border-radius:6px; margin-bottom:12px;">
@@ -579,37 +617,29 @@ class QattatApp {
           <!-- Editor Toolbar -->
           <div class="editor-toolbar">
             <div class="lang-selector">
-              <span style="font-size:0.75rem; color:var(--text-muted);">لغة الحل:</span>
-              <button class="lang-pill-btn ${this.activeLanguage === 'python' ? 'active' : ''}" onclick="window.app.switchLanguage('python')">Python</button>
-              <button class="lang-pill-btn ${this.activeLanguage === 'javascript' ? 'active' : ''}" onclick="window.app.switchLanguage('javascript')">JavaScript</button>
+              <span style="font-size:0.75rem; color:var(--text-muted);">لغة التدريب:</span>
+              <button class="lang-pill-btn ${this.activeLanguage === 'python' ? 'active' : ''}" onclick="window.app.switchLanguage('python')">Python 3</button>
+              <button class="lang-pill-btn ${this.activeLanguage === 'javascript' ? 'active' : ''}" onclick="window.app.switchLanguage('javascript')">JavaScript (ES6)</button>
             </div>
 
             <div style="display:flex; align-items:center; gap:8px;">
-              <button class="btn-secondary" style="padding:3px 10px; font-size:0.75rem;" onclick="window.app.resetCurrentCode()">
-                🔄 إعادة ضبط
+              <button class="btn-secondary" style="padding:4px 12px; font-size:0.75rem;" onclick="window.app.resetCurrentCode()">
+                🔄 استعادة الكود الأولي
               </button>
             </div>
           </div>
 
-          <!-- Code Input Box -->
+          <!-- Code Editor Mount Point (Ace Editor or Fallback) -->
           <div class="editor-core-wrapper">
-            <div class="line-numbers" id="line-numbers">
-              1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12
-            </div>
-            <textarea 
-              id="code-editor" 
-              class="code-textarea" 
-              spellcheck="false" 
-              oninput="window.app.updateLineNumbers(); window.app.saveChallengeCode('${c.id}', '${this.activeLanguage}', this.value);"
-              onkeydown="window.app.handleTabKey(event)"
-            >${code}</textarea>
+            <div id="ace-editor-instance"></div>
+            <textarea id="code-editor-fallback" class="code-textarea" style="display:none;" spellcheck="false"></textarea>
           </div>
 
           <!-- Bottom Console & Actions -->
           <div class="editor-bottom-bar">
             <div class="action-buttons-row">
               <div style="font-size:0.8rem; color:var(--text-muted);">
-                ${isCompleted ? '✅ هذا التحدي مكتمل' : 'اضغط تشغيل لتجربة الكود، أو إرسال لاعتماد الحل'}
+                ${isCompleted ? '✅ هذا التحدي مكتمل بنجاح' : 'اضغط تشغيل لاختبار الكود، أو إرسال لاعتماد التقييم'}
               </div>
               <div style="display:flex; gap:10px;">
                 <button class="btn-secondary" onclick="window.app.runCode()">
@@ -623,7 +653,7 @@ class QattatApp {
 
             <!-- Console Box -->
             <div class="console-container" id="console-output-box">
-              <div style="color:var(--text-muted);">Console جاهز. انقر "تشغيل الكود" أو "إرسال للتقييم" لعرض مخرجات الفحص.</div>
+              <div style="color:var(--text-muted);">[Ready] Console ready. Click 'Run Code' or 'Submit Solution' to execute.</div>
             </div>
           </div>
 
@@ -633,33 +663,14 @@ class QattatApp {
     `;
   }
 
-  handleTabKey(e) {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const target = e.target;
-      const start = target.selectionStart;
-      const end = target.selectionEnd;
-      target.value = target.value.substring(0, start) + '    ' + target.value.substring(end);
-      target.selectionStart = target.selectionEnd = start + 4;
-      this.updateLineNumbers();
-    }
-  }
-
-  updateLineNumbers() {
-    const editor = document.getElementById('code-editor');
-    const numBox = document.getElementById('line-numbers');
-    if (!editor || !numBox) return;
-
-    const lines = editor.value.split('\n').length;
-    let html = '';
-    for (let i = 1; i <= Math.max(lines, 12); i++) {
-      html += `${i}<br>`;
-    }
-    numBox.innerHTML = html;
-  }
-
   switchLanguage(lang) {
+    this.saveCurrentCodeFromEditor();
     this.activeLanguage = lang;
+    if (this.aceEditor) {
+      this.aceEditor.session.setMode(lang === 'python' ? 'ace/mode/python' : 'ace/mode/javascript');
+      const newCode = this.getChallengeCode(this.selectedChallenge.id, lang);
+      this.aceEditor.setValue(newCode, -1);
+    }
     this.render();
   }
 
@@ -670,29 +681,29 @@ class QattatApp {
     let html = '';
 
     if (this.compileError) {
-      html += `<div style="color:#f87171; margin-bottom:8px;">❌ خطأ برمجي: ${this.compileError}</div>`;
+      html += `<div style="color:#f87171; margin-bottom:8px; font-weight:700;">[Runtime / Syntax Error]:<br><span style="font-size:0.78rem;">${this.compileError}</span></div>`;
     }
 
     if (this.consoleOutput && this.consoleOutput.length > 0) {
-      html += `<div style="color:#38bdf8; margin-bottom:8px; font-weight:600;">[المخرجات المطبوعة]:</div>`;
+      html += `<div style="color:#38bdf8; margin-bottom:6px; font-weight:700;">[Standard Output / Print]:</div>`;
       this.consoleOutput.forEach(log => {
         html += `<div style="color:#e2e8f0; margin-left:8px;">&gt; ${log}</div>`;
       });
     }
 
     if (this.testResults && this.testResults.length > 0) {
-      html += `<div style="margin-top:10px; font-weight:700; color:#e2e8f0;">[نتائج فحص حالات الاختبار]:</div>`;
+      html += `<div style="margin-top:10px; font-weight:700; color:#e2e8f0;">[Test Cases Evaluation]:</div>`;
       this.testResults.forEach(r => {
         const cls = r.passed ? 'test-result-pass' : 'test-result-fail';
         html += `
           <div class="test-result-row ${cls}">
             <div>
-              <strong>${r.passed ? '✓ نجاح' : '✗ إخفاق'}</strong>: ${r.displayInput}
-              ${r.error ? `<br><span style="color:#f87171; font-size:0.75rem;">${r.error}</span>` : ''}
+              <strong>${r.passed ? '✓ PASSED' : '✗ FAILED'}</strong>: ${r.displayInput}
+              ${r.error ? `<br><span style="color:#f87171; font-size:0.75rem;">Error: ${r.error}</span>` : ''}
             </div>
-            <div style="font-size:0.75rem;">
-              <span>المتوقع: ${JSON.stringify(r.expected)}</span> | 
-              <span>الفعلي: ${JSON.stringify(r.actual)}</span> | 
+            <div style="font-size:0.75rem; text-align:right;">
+              <span>Expected: ${JSON.stringify(r.expected)}</span> | 
+              <span>Actual: ${JSON.stringify(r.actual)}</span> | 
               <span>${r.durationMs}ms</span>
             </div>
           </div>
@@ -700,7 +711,8 @@ class QattatApp {
       });
     }
 
-    box.innerHTML = html || '<div style="color:var(--text-muted);">لا توجد مخرجات بعد.</div>';
+    box.innerHTML = html || '<div style="color:var(--text-muted);">[Ready] Console ready.</div>';
+    box.scrollTop = box.scrollHeight;
   }
 
   /* 3. Qatt Code Lab */
@@ -921,7 +933,7 @@ class QattatApp {
             <h3 style="color:var(--qatt-blue); font-size:1.1rem; margin-bottom:6px;">🪮 المشط (Al-Misht)</h3>
             <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.6;">
               <strong>المفهوم التراثي:</strong> خطوط متوازية رأسية كأسنَان المشط تنظم الإيقاع البصري.<br>
-              <strong>المعادل البرمجي:</strong> حلقات التكرار (Loops)، معالجة المصفوفات المتتالية (Arrays)، والتدفقات الزمنية (Streams).
+              <strong>المعادل البرمجي:</strong> حلقات التكرار (Loops)، معالجة المصفوفات المتتالية (Arrays)، والتدفقات البرمجية (Streams).
             </p>
           </div>
 
@@ -948,7 +960,59 @@ class QattatApp {
   }
 
   postRender() {
-    this.updateLineNumbers();
+    if (this.currentTab === 'workspace') {
+      this.mountAceEditor();
+    }
+  }
+
+  mountAceEditor() {
+    const editorDom = document.getElementById('ace-editor-instance');
+    const fallbackDom = document.getElementById('code-editor-fallback');
+    const code = this.getChallengeCode(this.selectedChallenge.id, this.activeLanguage);
+
+    if (typeof window.ace !== 'undefined' && editorDom) {
+      try {
+        if (this.aceEditor) {
+          this.aceEditor.destroy();
+        }
+        this.aceEditor = window.ace.edit("ace-editor-instance");
+        const theme = this.state.theme === 'dark' ? 'ace/theme/tomorrow_night_eighties' : 'ace/theme/chrome';
+        this.aceEditor.setTheme(theme);
+        this.aceEditor.session.setMode(this.activeLanguage === 'python' ? 'ace/mode/python' : 'ace/mode/javascript');
+        this.aceEditor.setValue(code, -1);
+        this.aceEditor.setShowPrintMargin(false);
+        this.aceEditor.session.setUseWrapMode(true);
+        this.aceEditor.setOptions({
+          tabSize: 4,
+          useSoftTabs: true,
+          fontSize: "15px",
+          showGutter: true,
+          highlightActiveLine: true,
+          wrap: true
+        });
+
+        this.aceEditor.on('change', () => {
+          const val = this.aceEditor.getValue();
+          this.saveChallengeCode(this.selectedChallenge.id, this.activeLanguage, val);
+        });
+
+        // Hide fallback
+        if (fallbackDom) fallbackDom.style.display = 'none';
+        return;
+      } catch (aceInitErr) {
+        console.warn('Ace Editor initialization error, falling back to textarea:', aceInitErr);
+      }
+    }
+
+    // Fallback if Ace is not loaded
+    if (fallbackDom) {
+      fallbackDom.style.display = 'block';
+      fallbackDom.value = code;
+      fallbackDom.oninput = () => {
+        this.saveChallengeCode(this.selectedChallenge.id, this.activeLanguage, fallbackDom.value);
+      };
+      if (editorDom) editorDom.style.display = 'none';
+    }
   }
 }
 
